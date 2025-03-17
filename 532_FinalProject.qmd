@@ -1,0 +1,177 @@
+---
+title: "Final Project Precipitation Analysis"
+author: "Katie Webb"
+date: today
+date-format: "MMM D, YYYY"
+format: html
+---
+
+```{r}
+
+#Set-up
+
+# clear work space of all objects and unload all extra (non-base) packages
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+    res <- suppressWarnings(
+        lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+               detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
+
+# load libraries
+if (!requireNamespace("pacman")) install.packages("pacman")
+pacman::p_load(lubridate, tidyverse, here)
+
+
+
+
+```
+
+```{r}
+#load data and fix dates
+
+#total precipitation volume
+precip_volume <- read.csv(here("project/watershed_precip.csv")) %>% 
+  rename(date = `system.time_start`) %>%
+  mutate(date = dmy(date)) 
+
+#precipitation volume broken out by country
+precip_country <- read.csv(here("project/precip_country.csv")) %>% 
+  rename_with(tolower) %>% 
+  rename(date = `system.time_start`) %>%
+  mutate(date = dmy(date))
+
+#gilgel gibe resevoir area
+ggres_area <- read.csv(here("project/gg3res_area.csv")) %>%
+  mutate(date = dmy(date)) %>%
+  mutate(area = as.numeric(area))
+
+#lake turkana area
+turkana_area <- read.csv(here("project/turkana_area.csv")) %>%
+  mutate(date = dmy(date)) %>%
+  mutate(area = as.numeric(gsub(",", "", area)))
+
+omo_area <- read.csv(here("project/omo_area.csv")) %>%
+  mutate(date = dmy(date)) %>%
+  mutate(area = as.numeric(area))
+
+
+
+```
+
+``` {r}
+#join up the data for analysis
+
+#add pre-and post- dam category to data
+
+precip_country<- precip_country %>% mutate(dam = case_when(
+    precip_country$date < ymd("2015-01-01") ~ "pre",
+    TRUE ~ "post")) %>%
+    mutate(dam = factor(dam, levels = c("pre", "post")))
+
+#join the data together
+
+turkana <- left_join(turkana_area, precip_country, by = "date") 
+
+#summing kenya and ethiopia precip
+turkana$total_precip <- turkana$kenya + turkana$ethiopia 
+
+#adding the total precip to see how it compares to the sum from Kenya and ethiopia
+#it's pretty close
+turkana <- left_join(turkana, precip_volume, by = "date") 
+
+omo <- left_join(omo_area, precip_country, by = "date")
+
+ggres <- left_join(ggres_area, precip_country, by = "date")
+
+
+
+
+
+```
+
+```{r}
+#GGIII Res:
+
+ggres_plot <- ggplot(ggres, aes(x = ethiopia, y = area, color = dam, linetype = dam)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = F) +
+  labs(y = "Surface Water Extent (km^2)", 
+       x = "Precipitation volume (km^3) in Ethiopia", 
+       title = "Gilgel Gibe III Resevoir surface area vs precipitation pre- and post- dam") +
+  scale_color_manual(values = c("seagreen", "darkorchid")) +
+  theme_classic()
+
+ggres_plot
+
+ggres_mod <- lm(area ~ ethiopia * dam, data = ggres)
+summary(ggres_mod)
+
+#model is ggres_area = b0 + b1*precip + b2*dam + b3*precip*dam
+#set pre = 0, post = 1, then
+#pre dam: ggres_area = 3.4 + 0.03*precip
+#post dam: ggres_area = 148.7 + 0.33*precip
+#The post dam coeff is significant, but it would be silly if it wasn't. 
+#Not much to glean from this model. SE are huge - even for the dam term.
+
+```
+
+```{r}
+#Turkana:
+
+turkana_plot <- ggplot(turkana, aes(x = total_precip, y = area, color = dam, linetype = dam)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = F) +
+  labs(y = "Surface Water Extent (km^2)", 
+       x = "Precipitation volume (km^3) in Ethiopia", 
+       title = "Lake Turkana surface area vs precipitation pre- and post- dam") +
+  scale_color_manual(values = c("seagreen", "darkorchid")) +
+  theme_classic()
+
+turkana_plot
+
+turkana_mod <- lm(area ~ kenya + ethiopia * dam, data = turkana)
+summary(turkana_mod)
+
+
+#model is turkana_area = b0 + b1*precipK + b2*precipE + b3*precipE*dam 
+#there is also a dam on the other river, but it's older. Too old for data.
+#Treat the Turkwel as a constant - not influencing the model. 
+#set pre = 0, post = 1, then
+#pre dam: turk_area = 7977.6 + 2.5*precipK - 5.5*precipE
+#post dam: turk_area = 8401.6 + 2.5*precipK - 7.1*precipE
+#The post dam coeff is significant, but it would be silly if it wasn't. 
+#Not much to glean from this model. SE are again huge. 
+
+```
+
+```{r}
+#Omo:
+
+omo_plot <- ggplot(omo, aes(x = ethiopia, y = area, color = dam, linetype = dam)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = F) +
+  labs(y = "Surface Water Extent (km^2)", 
+       x = "Precipitation volume (km^3) in Ethiopia", 
+       title = "Lower Omo River surface area vs precipitation pre- and post- dam",
+       color = "Dam Construction") +
+  scale_color_manual(values = c("seagreen", "darkorchid")) +
+  guides(linetype = "none") +
+  theme_classic()
+
+omo_plot
+
+omo_mod <- lm(area ~ ethiopia * dam, data = omo)
+summary(omo_mod)
+
+#model is omo_area = b0 + b1*precip + b2*dam + b3*precip*dam
+#set pre = 0, post = 1, then
+#pre dam: omo_area = 21.3 + 0.06*precip
+#post dam: omo_area = 38.7 -0.05*precip
+#none of the coefficients are close to significant.
+#They look different, but SE is huge! Blows up the p-values
+
+#several limitations to all this:
+##Other things influence how much precipitation ends up as runoff in streams and lakes (ET, veg. and temp (which influence ET), soil storage, infiltration)
+#Ignoring bathymetry, adding the same volume of water is going to have a different effect on surface area in different water bodies depending on topography. Assuming here that for the same waterbody bathymetry is constant over time, so this shouldn't disrupt the model too much, but it doesn't account for things like sedimentation buildup that might affect bathymetry. 
+```
